@@ -4,11 +4,8 @@ import os
 from dataclasses import dataclass
 
 import joblib
+import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, r2_score
-from sklearn.model_selection import train_test_split
 
 FEATURE_COLUMNS = [
     "daily_water_usage",
@@ -27,44 +24,74 @@ class ModelArtifacts:
     r2: float
 
 
+class NumpyLinearRegressor:
+    """Minimal linear regressor using least-squares (no scikit-learn dependency)."""
+
+    def __init__(self):
+        self.coef_: np.ndarray | None = None
+        self.intercept_: float = 0.0
+
+    def fit(self, X: pd.DataFrame, y: pd.Series):
+        x_arr = X.to_numpy(dtype=float)
+        y_arr = y.to_numpy(dtype=float)
+        x_aug = np.c_[np.ones((x_arr.shape[0], 1)), x_arr]
+        beta, *_ = np.linalg.lstsq(x_aug, y_arr, rcond=None)
+        self.intercept_ = float(beta[0])
+        self.coef_ = beta[1:]
+        return self
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        if self.coef_ is None:
+            raise ValueError("Model is not fitted yet.")
+        x_arr = X.to_numpy(dtype=float)
+        return self.intercept_ + x_arr @ self.coef_
+
+
+def _train_test_split(
+    X: pd.DataFrame,
+    y: pd.Series,
+    test_size: float = 0.2,
+    random_state: int = 42,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+    rng = np.random.default_rng(random_state)
+    idx = np.arange(len(X))
+    rng.shuffle(idx)
+    split = int(len(X) * (1 - test_size))
+    train_idx = idx[:split]
+    test_idx = idx[split:]
+    return X.iloc[train_idx], X.iloc[test_idx], y.iloc[train_idx], y.iloc[test_idx]
+
+
+def _mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    return float(np.mean(np.abs(y_true - y_pred)))
+
+
+def _r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    ss_res = np.sum((y_true - y_pred) ** 2)
+    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    if ss_tot == 0:
+        return 1.0
+    return float(1 - (ss_res / ss_tot))
+
+
 def train_and_select_model(df: pd.DataFrame) -> tuple[object, ModelArtifacts]:
     X = df[FEATURE_COLUMNS]
     y = df[TARGET_COLUMN]
 
-    X_train, X_test, y_train, y_test = train_test_split(
+    X_train, X_test, y_train, y_test = _train_test_split(
         X, y, test_size=0.2, random_state=42
     )
 
-    candidates = {
-        "LinearRegression": LinearRegression(),
-        "RandomForestRegressor": RandomForestRegressor(
-            n_estimators=250,
-            random_state=42,
-            n_jobs=-1,
-        ),
-    }
+    model = NumpyLinearRegressor().fit(X_train, y_train)
+    preds = model.predict(X_test)
+    y_test_arr = y_test.to_numpy(dtype=float)
+    mae = _mae(y_test_arr, preds)
+    r2 = _r2(y_test_arr, preds)
 
-    best_model_name = ""
-    best_model = None
-    best_r2 = float("-inf")
-    best_mae = float("inf")
+    print(f"NumpyLinearRegression: MAE={mae:.2f}, R2={r2:.4f}")
 
-    for model_name, model in candidates.items():
-        model.fit(X_train, y_train)
-        preds = model.predict(X_test)
-        mae = mean_absolute_error(y_test, preds)
-        r2 = r2_score(y_test, preds)
-
-        print(f"{model_name}: MAE={mae:.2f}, R2={r2:.4f}")
-
-        if r2 > best_r2:
-            best_r2 = r2
-            best_mae = mae
-            best_model_name = model_name
-            best_model = model
-
-    artifacts = ModelArtifacts(model_name=best_model_name, mae=best_mae, r2=best_r2)
-    return best_model, artifacts
+    artifacts = ModelArtifacts(model_name="NumpyLinearRegression", mae=mae, r2=r2)
+    return model, artifacts
 
 
 if __name__ == "__main__":
