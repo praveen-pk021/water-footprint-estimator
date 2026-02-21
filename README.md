@@ -7,9 +7,9 @@ A capstone-ready ML + Streamlit project to estimate household water footprint an
 ```text
 water-footprint-estimator/
 +-- data/
-¦   +-- water_data.csv
+ï¿½   +-- water_data.csv
 +-- models/
-¦   +-- model.pkl
+ï¿½   +-- model.pkl
 +-- app.py
 +-- data_generator.py
 +-- train_model.py
